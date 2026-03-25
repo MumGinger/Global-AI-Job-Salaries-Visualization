@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI Jobs Salary Explorer</title>
+    <link rel="stylesheet" href="style.css" />
+    <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js"></script>
+    <script src="script.js" defer></script>
+  </head>
+  <body>
+    <main class="page-shell">
+      <header class="page-header">
+        <h1>
+          Global AI Job Salaries
+          <p class="page-subtitle">
+               by City, Experience, Category, and Industry with box plot distributions
+        </h1>
+      </header>
+
+      <section class="panel" aria-labelledby="map-panel-title">
+        <div class="panel-heading">
+          <div>
+            <p class="panel-kicker">Top View</p>
+            <h2 id="map-panel-title">Global AI Jobs Map</h2>
+            <p class="panel-instruction">
+              Zoom and click a city to focus, drag to pan, and use the reset button
+              to return to the global view.
+            </p>
+          </div>
+        </div>
+
+        <div class="viz-frame map-frame">
+          <!-- Remote is drawn inside this same SVG window so it feels like a
+               first-class location filter without implying a physical map position. -->
+          <svg
+            id="map-svg"
+            viewBox="0 0 1120 470"
+            role="img"
+            aria-label="World map showing AI job posting locations by city"
+          ></svg>
+        </div>
+        <p id="map-status" class="helper-text">
+          Loading map and coordinate coverage...
+        </p>
+      </section>
+
+      <section class="controls-panel" aria-label="Filters">
+        <div class="control-group">
+          <label for="category-select">Job category</label>
+          <select id="category-select">
+            <option value="__ALL__">All job categories</option>
+          </select>
+        </div>
+
+        <div class="control-group">
+          <label for="industry-select">Industry</label>
+          <select id="industry-select">
+            <option value="__ALL__">All industries</option>
+          </select>
+        </div>
+
+        <div class="control-group button-group">
+          <label class="button-label" for="reset-city-button">Reset filters</label>
+          <button id="reset-city-button" type="button">Reset all</button>
+        </div>
+      </section>
+
+      <!-- The lower panel merges current selection details and the box plot so
+           the summary context and distribution view read as one coordinated unit. -->
+      <section class="panel combined-panel" aria-live="polite" aria-labelledby="summary-scope">
+        <div class="bottom-panel-summary">
+          <p class="panel-kicker section-label">Bottom View</p>
+          <h2 id="summary-scope">Loading selection summary...</h2>
+          <p id="summary-detail" class="selection-detail">
+            Category: loading | Industry: loading
+          </p>
+        </div>
+
+        <div class="boxplot-header-row">
+          <div class="boxplot-header-text">
+            <h3 id="box-panel-title">Annual Salary Box Plot</h3>
+            <p class="chart-subtitle">
+              Hover over the box plot and outliers to see more details.
+            </p>
+          </div>
+          <div id="box-metrics" class="boxplot-metrics" aria-live="polite"></div>
+        </div>
+
+        <div id="boxplot-container" class="viz-frame box-frame">
+          <svg
+            id="boxplot-svg"
+            viewBox="0 0 1120 430"
+            role="img"
+            aria-label="Box plot of annual salary by years of experience"
+          ></svg>
+        </div>
+      </section>
+    </main>
+
+    <div id="tooltip" class="tooltip" role="status" aria-hidden="true"></div>
+  </body>
+</html>
