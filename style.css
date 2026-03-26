@@ -148,6 +148,39 @@ svg {
   line-height: 1.45;
 }
 
+.page-credits {
+  margin-top: 30px;
+  padding: 16px 4px 0;
+  border-top: 1px solid rgba(73, 86, 99, 0.12);
+  color: var(--muted);
+  font-size: 0.65rem;
+  line-height: 1.6;
+}
+
+.page-credits h2 {
+  margin: 0 0 8px;
+  font-size: 0.7rem;
+  font-family: var(--font-sans);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent-strong);
+}
+
+.page-credits p {
+  margin: 4px 0;
+}
+
+.page-credits a {
+  color: rgba(20, 82, 104, 0.88);
+  text-decoration-color: rgba(20, 82, 104, 0.34);
+  text-underline-offset: 2px;
+}
+
+.page-credits a:hover {
+  color: var(--accent-strong);
+}
+
 .controls-panel {
   display: grid;
   grid-template-columns: minmax(180px, 0.9fr) minmax(0, 1.1fr) auto;

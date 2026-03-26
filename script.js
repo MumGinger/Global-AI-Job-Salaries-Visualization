@@ -1,4 +1,6 @@
 const DATA_URL = "ai_jobs_market_2025_2026.csv";
+// The page includes an on-page Sources block so the dataset and map geometry
+// used by the visualization are acknowledged directly in the prototype itself.
 const WORLD_ATLAS_SOURCES = [
   "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json",
   "https://unpkg.com/world-atlas@2/countries-110m.json",
