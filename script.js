@@ -4,6 +4,20 @@ const WORLD_ATLAS_SOURCES = [
   "https://unpkg.com/world-atlas@2/countries-110m.json",
 ];
 const ALL_VALUE = "__ALL__";
+const DEFAULT_FILTER_TYPE = "job_category";
+const FILTER_TYPES = {
+  [DEFAULT_FILTER_TYPE]: {
+    label: "Job category",
+    allLabel: "All job categories",
+    rowKey: "jobCategory",
+  },
+  industry: {
+    label: "Industry",
+    allLabel: "All industries",
+    rowKey: "industry",
+  },
+};
+const EXPERIENCE_LEVELS = d3.range(1, 16);
 
 const columnCandidates = {
   city: ["city", "job_city", "location_city"],
@@ -57,8 +71,10 @@ const state = {
   worldFeatures: [],
   columns: null,
   selectedLocation: null,
-  selectedCategory: ALL_VALUE,
-  selectedIndustry: ALL_VALUE,
+  // Only one attribute filter is active at a time: the chosen type plus
+  // the selected value within that attribute.
+  selectedFilterType: DEFAULT_FILTER_TYPE,
+  selectedFilterValue: ALL_VALUE,
   globalSalaryExtent: [0, 0],
   allExperienceLevels: [],
   knownLocations: [],
@@ -68,11 +84,13 @@ const state = {
 };
 
 const dom = {
-  categorySelect: document.getElementById("category-select"),
-  industrySelect: document.getElementById("industry-select"),
+  filterTypeSelect: document.getElementById("filter-type-select"),
+  filterValueSelect: document.getElementById("filter-value-select"),
   resetCityButton: document.getElementById("reset-city-button"),
   summaryScope: document.getElementById("summary-scope"),
   summaryDetail: document.getElementById("summary-detail"),
+  boxPanelTitle: document.getElementById("box-panel-title"),
+  chartPanelHint: document.getElementById("chart-panel-hint"),
   boxMetrics: document.getElementById("box-metrics"),
   mapStatus: document.getElementById("map-status"),
   tooltip: d3.select("#tooltip"),
@@ -109,10 +127,12 @@ const mapLayers = {
 
 const boxLayers = {
   root: null,
-  grid: null,
+  yGrid: null,
+  xGrid: null,
   xAxis: null,
   yAxis: null,
   boxes: null,
+  scatter: null,
   message: null,
 };
 
@@ -139,15 +159,13 @@ async function loadData() {
       worldAtlas.objects.countries,
     ).features;
     state.globalSalaryExtent = d3.extent(state.rows, (d) => d.annualSalaryUsd);
-    state.allExperienceLevels = Array.from(
-      new Set(state.rows.map((d) => d.yearsOfExperience)),
-    ).sort(d3.ascending);
+    state.allExperienceLevels = [...EXPERIENCE_LEVELS];
 
     syncCityCoordinateLookup(state.rows);
     initMap();
     initBoxPlot();
     initControls();
-    updateControls();
+    updateFilterControls();
     updateAll();
   } catch (error) {
     console.error(error);
@@ -193,7 +211,7 @@ function detectColumns(columns) {
 
 function preprocessData(rawRows, columns) {
   return rawRows
-    .map((row) => {
+    .map((row, index) => {
       const city = cleanText(row[columns.city]);
       const country = cleanText(row[columns.country]) || "Unknown";
       const jobCategory = cleanText(row[columns.jobCategory]);
@@ -204,6 +222,7 @@ function preprocessData(rawRows, columns) {
       const annualSalaryUsd = Number.parseFloat(row[columns.annualSalaryUsd]);
 
       return {
+        rowId: index,
         city,
         country,
         jobCategory,
@@ -343,25 +362,26 @@ function applyMapZoomStyles() {
 }
 
 function initControls() {
-  dom.categorySelect.addEventListener("change", (event) => {
-    state.selectedCategory = event.target.value;
-    updateControls();
+  dom.filterTypeSelect.addEventListener("change", (event) => {
+    state.selectedFilterType = event.target.value;
+    state.selectedFilterValue = ALL_VALUE;
+    updateFilterControls();
     updateAll();
   });
 
-  dom.industrySelect.addEventListener("change", (event) => {
-    state.selectedIndustry = event.target.value;
-    updateControls();
+  dom.filterValueSelect.addEventListener("change", (event) => {
+    state.selectedFilterValue = event.target.value;
+    updateFilterControls();
     updateAll();
   });
 
   dom.resetCityButton.addEventListener("click", () => {
-    // Reset now clears all dropdown filters along with the selected location
-    // and returns the map to the default global zoom/focus state.
+    // Reset restores the default single-filter view and clears the location
+    // focus before returning the map to its global zoom state.
     state.selectedLocation = null;
-    state.selectedCategory = ALL_VALUE;
-    state.selectedIndustry = ALL_VALUE;
-    updateControls();
+    state.selectedFilterType = DEFAULT_FILTER_TYPE;
+    state.selectedFilterValue = ALL_VALUE;
+    updateFilterControls();
     updateAll();
     resetMapZoom();
   });
@@ -392,8 +412,15 @@ function initBoxPlot() {
       "transform",
       `translate(${boxConfig.margin.left},${boxConfig.margin.top})`,
     );
-  boxLayers.grid = boxLayers.root.append("g").attr("class", "grid");
+  // One shared chart area supports both modes: the all-locations box plot and
+  // the selected-location scatter plot.
+  boxLayers.yGrid = boxLayers.root.append("g").attr("class", "grid y-grid");
+  boxLayers.xGrid = boxLayers.root
+    .append("g")
+    .attr("class", "grid x-grid")
+    .attr("transform", `translate(0,${innerHeight})`);
   boxLayers.boxes = boxLayers.root.append("g");
+  boxLayers.scatter = boxLayers.root.append("g").attr("class", "scatter-layer");
   boxLayers.xAxis = boxLayers.root
     .append("g")
     .attr("class", "axis")
@@ -423,42 +450,33 @@ function initBoxPlot() {
 function updateAll() {
   updateMap();
   updateSelectionSummary();
-  updateBoxPlot();
+  updateChart();
 }
 
-function updateControls() {
-  const validCategories = getValidCategoryOptions();
+function updateFilterControls() {
+  const filterConfig = getCurrentFilterConfig();
+  const validValues = getValidFilterValues();
+
   if (
-    state.selectedCategory !== ALL_VALUE &&
-    !validCategories.includes(state.selectedCategory)
+    state.selectedFilterValue !== ALL_VALUE &&
+    !validValues.includes(state.selectedFilterValue)
   ) {
-    state.selectedCategory = ALL_VALUE;
+    state.selectedFilterValue = ALL_VALUE;
   }
 
-  const validIndustries = getValidIndustryOptions();
-  if (
-    state.selectedIndustry !== ALL_VALUE &&
-    !validIndustries.includes(state.selectedIndustry)
-  ) {
-    state.selectedIndustry = ALL_VALUE;
-  }
-
+  dom.filterTypeSelect.value = state.selectedFilterType;
+  // Rebuild the value dropdown from the current location scope and currently
+  // selected attribute type so only meaningful choices remain available.
   populateSelect(
-    dom.categorySelect,
-    validCategories,
-    "All job categories",
-    state.selectedCategory,
-  );
-  populateSelect(
-    dom.industrySelect,
-    validIndustries,
-    "All industries",
-    state.selectedIndustry,
+    dom.filterValueSelect,
+    validValues,
+    filterConfig.allLabel,
+    state.selectedFilterValue,
   );
   dom.resetCityButton.disabled =
     !state.selectedLocation &&
-    state.selectedCategory === ALL_VALUE &&
-    state.selectedIndustry === ALL_VALUE;
+    state.selectedFilterType === DEFAULT_FILTER_TYPE &&
+    state.selectedFilterValue === ALL_VALUE;
 }
 
 function updateMap() {
@@ -562,24 +580,17 @@ function updateMapStatus(locationSummaries, plottedLocations, remoteSummary) {
   const missingCities = locationSummaries
     .filter((d) => !d.isMapped && d.city !== "Remote")
     .map((d) => d.city);
-  const filterSummary = [
-    state.selectedCategory === ALL_VALUE
-      ? "all categories"
-      : state.selectedCategory,
-    state.selectedIndustry === ALL_VALUE
-      ? "all industries"
-      : state.selectedIndustry,
-  ].join(" | ");
+  const filterSummary = getActiveFilterLabel();
 
   if (!locationSummaries.length) {
-    dom.mapStatus.textContent = `No locations match the current map filters (${filterSummary}).`;
+    dom.mapStatus.textContent = `No locations match the current map filter (${filterSummary}).`;
     return;
   }
 
   const mappedText = `Map currently plots ${plottedLocations.length} geographic locations`;
   const remoteText = remoteSummary
     ? "and includes Remote position at the bottom left corner."
-    : "and no Remote postings match the current dropdown scope.";
+    : "and no Remote postings match the current filter scope.";
 
   if (missingCities.length) {
     dom.mapStatus.textContent = `${mappedText} ${remoteText} Missing coordinates: ${missingCities.join(
@@ -592,25 +603,26 @@ function updateMapStatus(locationSummaries, plottedLocations, remoteSummary) {
 
 function updateSelectionSummary() {
   const locationLabel = state.selectedLocation || "All locations";
-  const categoryLabel =
-    state.selectedCategory === ALL_VALUE
-      ? "All job categories"
-      : state.selectedCategory;
-  const industryLabel =
-    state.selectedIndustry === ALL_VALUE
-      ? "All industries"
-      : state.selectedIndustry;
 
   dom.summaryScope.textContent = locationLabel;
-  dom.summaryDetail.textContent = `Category: ${categoryLabel} | Industry: ${industryLabel}`;
+  // The lower summary line now mirrors the single active attribute filter
+  // instead of listing category and industry together.
+  dom.summaryDetail.textContent = getSelectionFilterSummary();
 }
 
-function updateBoxPlot() {
+function updateChart() {
   const filteredRows = getFilteredData();
   const medianSalary = filteredRows.length
     ? d3.median(filteredRows, (d) => d.annualSalaryUsd)
     : null;
+  const isScatter = shouldUseScatterPlot();
+  const innerWidth = getBoxInnerWidth();
+  const innerHeight = getBoxInnerHeight();
+  const transition = boxSvg.transition().duration(650);
 
+  // Scatter is reserved for the most specific city-level subsets: once a
+  // location is selected and the active filter value is no longer "All".
+  updateChartHeader(isScatter);
   dom.boxMetrics.innerHTML = [
     createStatLine("Postings", filteredRows.length.toLocaleString()),
     createStatLine(
@@ -619,23 +631,19 @@ function updateBoxPlot() {
     ),
   ].join("");
 
-  const boxStats = d3
-    .groups(filteredRows, (d) => d.yearsOfExperience)
-    .map(([yearsOfExperience, rows]) =>
-      computeBoxStats(yearsOfExperience, rows),
-    )
-    .sort((a, b) => d3.ascending(a.experience, b.experience));
-
-  const innerWidth = getBoxInnerWidth();
-  const innerHeight = getBoxInnerHeight();
-  const transition = boxSvg.transition().duration(650);
-
   xScale.domain(state.allExperienceLevels);
   yScale.domain(getSalaryDomain()).nice();
 
-  boxLayers.grid
+  boxLayers.yGrid
     .transition(transition)
     .call(d3.axisLeft(yScale).tickSize(-innerWidth).tickFormat(""))
+    .call((group) => group.selectAll("line").attr("stroke-dasharray", "4 4"));
+
+  // Vertical guide lines are drawn from the center of each discrete year band
+  // so both the box plot and scatter plot stay aligned to years 1 through 15.
+  boxLayers.xGrid
+    .transition(transition)
+    .call(d3.axisBottom(xScale).tickSize(-innerHeight).tickFormat(""))
     .call((group) => group.selectAll("line").attr("stroke-dasharray", "4 4"));
 
   boxLayers.xAxis
@@ -646,8 +654,48 @@ function updateBoxPlot() {
     .transition(transition)
     .call(d3.axisLeft(yScale).ticks(6).tickFormat(formatCurrencyCompact));
 
+  if (isScatter) {
+    renderScatterPlot(filteredRows, { innerWidth, innerHeight, transition });
+    return;
+  }
+
+  renderBoxPlot(filteredRows, { innerWidth, innerHeight, transition });
+}
+
+function updateChartHeader(isScatter) {
+  dom.boxPanelTitle.textContent = isScatter
+    ? "Annual Salary Scatter Plot"
+    : "Annual Salary Box Plot";
+  dom.chartPanelHint.textContent = isScatter
+    ? "Hover over points to see more details."
+    : "Hover over the box plot and outliers to see more details.";
+  boxSvg.attr(
+    "aria-label",
+    isScatter
+      ? "Scatter plot of annual salary by years of experience"
+      : "Box plot of annual salary by years of experience",
+  );
+}
+
+function shouldUseScatterPlot() {
+  return (
+    Boolean(state.selectedLocation) && state.selectedFilterValue !== ALL_VALUE
+  );
+}
+
+function renderBoxPlot(filteredRows, { innerWidth, innerHeight, transition }) {
+  clearScatterLayer(transition);
+
+  const boxStats = d3
+    .groups(filteredRows, (d) => d.yearsOfExperience)
+    .map(([yearsOfExperience, rows]) =>
+      computeBoxStats(yearsOfExperience, rows),
+    )
+    .sort((a, b) => d3.ascending(a.experience, b.experience));
+  const isEmpty = filteredRows.length === 0;
   const isSparse =
-    filteredRows.length < 2 || boxStats.every((stat) => stat.count < 2);
+    !isEmpty &&
+    (filteredRows.length < 2 || boxStats.every((stat) => stat.count < 2));
   const displayedStats = isSparse ? [] : boxStats;
   const boxWidth = Math.min(xScale.bandwidth() * 0.64, 44);
 
@@ -777,27 +825,117 @@ function updateBoxPlot() {
 
   groups.select(".outliers").raise();
 
-  const messageData = isSparse ? [1] : [];
+  updateChartMessage({
+    innerWidth,
+    innerHeight,
+    title: isEmpty
+      ? "No data for the current selection."
+      : isSparse
+        ? "Not enough data for the current selection."
+        : null,
+    note: isSparse
+      ? "This combination is valid, but the sample is too sparse for a box plot."
+      : null,
+  });
+}
+
+function renderScatterPlot(
+  filteredRows,
+  { innerWidth, innerHeight, transition },
+) {
+  clearBoxPlotLayer(transition);
+
+  const scatterRows = filteredRows.filter(
+    (d) => xScale(d.yearsOfExperience) !== undefined,
+  );
+
+  const points = boxLayers.scatter
+    .selectAll(".scatter-point")
+    .data(scatterRows, (d) => d.rowId)
+    .join(
+      (enter) =>
+        enter
+          .append("circle")
+          .attr("class", "scatter-point")
+          .attr("cx", (d) => getScatterXPosition(d))
+          .attr("cy", (d) => yScale(d.annualSalaryUsd))
+          .attr("r", 0)
+          .style("opacity", 0),
+      (update) => update,
+      (exit) =>
+        exit.transition(transition).attr("r", 0).style("opacity", 0).remove(),
+    );
+
+  points
+    .on("mouseenter", (event, datum) => showScatterTooltip(event, datum))
+    .on("mousemove", handleTooltipMove)
+    .on("mouseleave", hideTooltip)
+    .transition(transition)
+    .attr("cx", (d) => getScatterXPosition(d))
+    .attr("cy", (d) => yScale(d.annualSalaryUsd))
+    .attr("r", 4.1)
+    .style("opacity", 0.62);
+
+  updateChartMessage({
+    innerWidth,
+    innerHeight,
+    title: scatterRows.length ? null : "No data for the current selection.",
+    note: null,
+  });
+}
+
+function clearBoxPlotLayer(transition) {
+  boxLayers.boxes
+    .selectAll(".box-group")
+    .transition(transition)
+    .style("opacity", 0)
+    .remove();
+}
+
+function clearScatterLayer(transition) {
+  boxLayers.scatter
+    .selectAll(".scatter-point")
+    .transition(transition)
+    .attr("r", 0)
+    .style("opacity", 0)
+    .remove();
+}
+
+function updateChartMessage({
+  innerWidth,
+  innerHeight,
+  title = null,
+  note = null,
+}) {
   boxLayers.message
     .selectAll(".empty-state")
-    .data(messageData)
+    .data(title ? [title] : [])
     .join("text")
     .attr("class", "empty-state")
     .attr("x", innerWidth / 2)
     .attr("y", innerHeight / 2)
-    .text("Not enough data for the current selection.");
+    .text((d) => d);
 
   boxLayers.message
     .selectAll(".chart-note")
-    .data(isSparse ? [1] : [])
+    .data(note ? [note] : [])
     .join("text")
     .attr("class", "chart-note")
     .attr("x", innerWidth / 2)
     .attr("y", innerHeight / 2 + 24)
     .attr("text-anchor", "middle")
-    .text(
-      "This combination is valid, but the sample is too sparse for a box plot.",
-    );
+    .text((d) => d);
+}
+
+function getScatterXPosition(row) {
+  // years_of_experience is discrete integer data, so points intentionally sit
+  // exactly on the center of each year line rather than being jittered.
+  return getExperienceBandCenter(row.yearsOfExperience);
+}
+
+function getExperienceBandCenter(year) {
+  const bandStart = xScale(year);
+  return bandStart + xScale.bandwidth() / 2;
 }
 
 function getRowsForMap() {
@@ -808,39 +946,51 @@ function getFilteredData() {
   return getScopedData();
 }
 
-// Dependent dropdown filtering:
-// 1. selectedLocation (including "Remote") defines the scope first.
-// 2. valid categories are computed inside that scope.
-// 3. valid industries are computed inside the location + category scope.
-// 4. invalid downstream selections are cleared before the controls redraw.
+function getFilterConfig(filterType) {
+  return FILTER_TYPES[filterType] || FILTER_TYPES[DEFAULT_FILTER_TYPE];
+}
+
+function getCurrentFilterConfig() {
+  return getFilterConfig(state.selectedFilterType);
+}
+
+function getActiveFilterLabel() {
+  const filterConfig = getCurrentFilterConfig();
+  return state.selectedFilterValue === ALL_VALUE
+    ? filterConfig.allLabel
+    : `${filterConfig.label}: ${state.selectedFilterValue}`;
+}
+
+function getSelectionFilterSummary() {
+  const filterConfig = getCurrentFilterConfig();
+  return state.selectedFilterValue === ALL_VALUE
+    ? `Filter: ${filterConfig.allLabel}`
+    : `${filterConfig.label}: ${state.selectedFilterValue}`;
+}
+
+// Filtering now scopes the data by location first and then applies at most
+// one optional attribute filter, based on the selected filter type/value.
 function getScopedData({
   location = state.selectedLocation,
-  category = state.selectedCategory,
-  industry = state.selectedIndustry,
+  filterType = state.selectedFilterType,
+  filterValue = state.selectedFilterValue,
 } = {}) {
+  const filterConfig = getFilterConfig(filterType);
+
   return state.rows.filter(
     (d) =>
       matchesSelection(d.city, location) &&
-      matchesSelection(d.jobCategory, category) &&
-      matchesSelection(d.industry, industry),
+      matchesSelection(d[filterConfig.rowKey], filterValue),
   );
 }
 
-function getValidCategoryOptions() {
-  return Array.from(
-    new Set(
-      getScopedData({ category: ALL_VALUE, industry: ALL_VALUE })
-        .map((d) => d.jobCategory)
-        .filter(Boolean),
-    ),
-  ).sort(d3.ascending);
-}
+function getValidFilterValues() {
+  const filterConfig = getCurrentFilterConfig();
 
-function getValidIndustryOptions() {
   return Array.from(
     new Set(
-      getScopedData({ industry: ALL_VALUE })
-        .map((d) => d.industry)
+      getScopedData({ filterValue: ALL_VALUE })
+        .map((d) => d[filterConfig.rowKey])
         .filter(Boolean),
     ),
   ).sort(d3.ascending);
@@ -915,7 +1065,7 @@ function summarizeLocations(rows) {
 function toggleLocationSelection(location) {
   const nextLocation = state.selectedLocation === location ? null : location;
   state.selectedLocation = nextLocation;
-  updateControls();
+  updateFilterControls();
   updateAll();
 
   if (!nextLocation || nextLocation === "Remote") {
@@ -972,18 +1122,43 @@ function handleLocationTooltipEnter(event, datum) {
   handleTooltipMove(event);
 }
 
+function showScatterTooltip(event, datum) {
+  const filterConfig = getCurrentFilterConfig();
+  const rows = [
+    // createTooltipRow("City", datum.city),
+    createTooltipRow("Country", datum.country),
+    createTooltipRow("Years of experience", datum.yearsOfExperience.toString()),
+    createTooltipRow("Annual salary", formatCurrency(datum.annualSalaryUsd)),
+  ];
+
+  // if (datum[filterConfig.rowKey]) {
+  //   rows.push(createTooltipRow(filterConfig.label, datum[filterConfig.rowKey]));
+  // }
+
+  dom.tooltip
+    .html([`<strong>${escapeHtml(datum.city)}</strong>`, ...rows].join(""))
+    .style("opacity", 1)
+    .attr("aria-hidden", "false");
+  handleTooltipMove(event);
+}
+
 // Box plot tooltip summarizes the hovered experience group, and if an outlier
 // is hovered it appends that specific salary value to the same shared tooltip.
 function showBoxTooltip(event, datum, outlierValue = null) {
   const rows = [
-    createTooltipRow("Years of experience", datum.experience.toString()),
     createTooltipRow("Postings", datum.count.toLocaleString()),
     createTooltipRow("Median salary", formatCurrency(datum.median)),
-    createTooltipRow("Q1", formatCurrency(datum.q1)),
-    createTooltipRow("Q3", formatCurrency(datum.q3)),
-    createTooltipRow("Whisker min", formatCurrency(datum.lowerWhisker)),
-    createTooltipRow("Whisker max", formatCurrency(datum.upperWhisker)),
   ];
+  if (outlierValue == null) {
+    rows.push(createTooltipRow("Q1", formatCurrency(datum.q1)));
+    rows.push(createTooltipRow("Q3", formatCurrency(datum.q3)));
+    rows.push(
+      createTooltipRow("Whisker min", formatCurrency(datum.lowerWhisker)),
+    );
+    rows.push(
+      createTooltipRow("Whisker max", formatCurrency(datum.upperWhisker)),
+    );
+  }
 
   if (outlierValue !== null) {
     rows.push(createTooltipRow("Outlier salary", formatCurrency(outlierValue)));
@@ -1008,8 +1183,7 @@ function hideTooltip() {
 
 function showLoadError(error) {
   dom.summaryScope.textContent = "Visualization could not be loaded";
-  dom.summaryDetail.textContent =
-    "Category: unavailable | Industry: unavailable";
+  dom.summaryDetail.textContent = "Filter: unavailable";
   dom.boxMetrics.innerHTML = createStatLine("Reason", "Check console");
   dom.mapStatus.textContent = error.message;
 

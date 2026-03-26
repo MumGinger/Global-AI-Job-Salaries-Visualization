@@ -48,16 +48,17 @@
 
       <section class="controls-panel" aria-label="Filters">
         <div class="control-group">
-          <label for="category-select">Job category</label>
-          <select id="category-select">
-            <option value="__ALL__">All job categories</option>
+          <label for="filter-type-select">Filter by</label>
+          <select id="filter-type-select">
+            <option value="job_category">Job category</option>
+            <option value="industry">Industry</option>
           </select>
         </div>
 
         <div class="control-group">
-          <label for="industry-select">Industry</label>
-          <select id="industry-select">
-            <option value="__ALL__">All industries</option>
+          <label for="filter-value-select">Filter value</label>
+          <select id="filter-value-select">
+            <option value="__ALL__">All job categories</option>
           </select>
         </div>
 
@@ -74,14 +75,14 @@
           <p class="panel-kicker section-label">Bottom View</p>
           <h2 id="summary-scope">Loading selection summary...</h2>
           <p id="summary-detail" class="selection-detail">
-            Category: loading | Industry: loading
+            Filter: loading
           </p>
         </div>
 
         <div class="boxplot-header-row">
           <div class="boxplot-header-text">
             <h3 id="box-panel-title">Annual Salary Box Plot</h3>
-            <p class="chart-subtitle">
+            <p id="chart-panel-hint" class="chart-subtitle">
               Hover over the box plot and outliers to see more details.
             </p>
           </div>
